@@ -32,39 +32,41 @@ def cycle(dl):
 
 
 class TransformerHead(nn.Module):
-    def __init__(self, input_dim, output_dim, num_heads=4, num_layers=3, dim_feedforward=1024, dropout=0.3):
+    def __init__(self, input_dim, output_dim, num_heads=8, num_layers=6, dim_feedforward=1024, dropout=0.3):
         super(TransformerHead, self).__init__()
 
         self.embedding = nn.Linear(input_dim, dim_feedforward)
-
+        self.pos_encoder = nn.Parameter(torch.zeros(1, input_dim, dim_feedforward))
+        
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=dim_feedforward,  # 这里 `d_model` 和 `dim_feedforward` 都设置为同一个值
-            nhead=num_heads,          # 注意力头的数量
-            dim_feedforward=dim_feedforward,  # 前馈网络内部的维度
-            dropout=dropout           # Dropout 概率
+            d_model=dim_feedforward,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            norm_first=True  
         )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        self.fc1 = nn.Linear(dim_feedforward, dim_feedforward // 2)
+        self.pooling = nn.AdaptiveAvgPool1d(1)  
+        self.fc1 = nn.Sequential(
+            nn.Linear(dim_feedforward, dim_feedforward // 2),
+            nn.BatchNorm1d(dim_feedforward // 2),  
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
         self.fc2 = nn.Linear(dim_feedforward // 2, output_dim)
 
-        self.dropout = nn.Dropout(dropout)
-        self.relu = nn.ReLU()
-
     def forward(self, x):
-        x = self.embedding(x)
+        x = self.embedding(x) + self.pos_encoder  
         x = self.relu(x)
         x = self.dropout(x)
 
         x = x.permute(1, 0, 2)
         x = self.transformer(x)
-        x = torch.mean(x, dim=0)
+        x = x.permute(1, 2, 0)
+        x = self.pooling(x).squeeze(-1)  # 自适应池化
 
         x = self.fc1(x)
-        x = self.relu(x)
-        x = self.dropout(x)
-
         x = self.fc2(x)
         return x
 
